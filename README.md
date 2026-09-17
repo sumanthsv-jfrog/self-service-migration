@@ -48,6 +48,29 @@ state/                          committed per-job state files
 docs/                           design notes, decisions, open questions
 ```
 
+## Flow diagram
+
+```mermaid
+flowchart TD
+    A[User triggers workflow_dispatch<br/>repo_name, env] --> B[checkConnectivity<br/>jf rt ping source-server, target-server]
+    B -->|unreachable| B1[Fail: reject]
+    B -->|ok| C{Repo exists<br/>in source?}
+    C -->|no| C1[Fail: repo not found in source]
+    C -->|yes| D{Repo exists<br/>in target?}
+    D -->|yes| F[preMigration]
+    D -->|no| E[createRepo<br/>GET source config → PUT to target]
+    E --> F
+    F --> F1{Another transfer-files<br/>already running?}
+    F1 -->|yes| F2[Wait, re-check periodically]
+    F2 --> F1
+    F1 -->|no| G[runMigration<br/>jf rt transfer-files source-server target-server repo]
+    G --> H[pollProgress every N seconds<br/>update state/job_id.json, commit + push]
+    H --> I{transfer-files<br/>exit status}
+    I -->|non-zero| J[handleFailure<br/>status=failed, log error tail]
+    I -->|zero| K[logDiffNotes<br/>compare file count + size, diagnostic only]
+    K --> L[status=completed]
+```
+
 ## Requirements
 
 - GitHub Actions with `contents: write` permission on this repo (needed
