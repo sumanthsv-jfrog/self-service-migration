@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Repository map</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #F5F6F8;
+    --panel: #FFFFFF;
+    --panel-raised: #FFFFFF;
+    --border: #DDE1E7;
+    --border-strong: #C3C9D2;
+    --text: #171A21;
+    --text-secondary: #4B5563;
+    --text-muted: #8A93A3;
+    --local: #1E8F63; --local-bg: #E4F5EC; --local-border: #A9DBC2;
+    --remote: #2F6FE4; --remote-bg: #E7F0FE; --remote-border: #B4CDF7;
+    --federated: #8B4FD1; --federated-bg: #F1E8FB; --federated-border: #D3B9F0;
+    --virtual: #B36B00; --virtual-bg: #FBF0DD; --virtual-border: #EFCE8F;
+    --danger: #C43D33; --danger-bg: #FBEAE8; --danger-border: #F0BAB4;
+    --radius: 6px;
+    --font-ui: 'Space Grotesk', sans-serif;
+    --font-mono: 'IBM Plex Mono', monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12151B;
+      --panel: #171B23;
+      --panel-raised: #1D222C;
+      --border: #2A313D;
+      --border-strong: #3A4351;
+      --text: #E8ECF1;
+      --text-secondary: #A7B0BE;
+      --text-muted: #6E7787;
+      --local: #6FCBA1; --local-bg: #16261E; --local-border: #2C4A3A;
+      --remote: #86ADF5; --remote-bg: #131E30; --remote-border: #28405F;
+      --federated: #C6A2ED; --federated-bg: #201730; --federated-border: #3D2B57;
+      --virtual: #F0B36B; --virtual-bg: #2A1F0F; --virtual-border: #4D3A1C;
+      --danger: #F0837A; --danger-bg: #2C1512; --danger-border: #55251F;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #12151B;
+    --panel: #171B23;
+    --panel-raised: #1D222C;
+    --border: #2A313D;
+    --border-strong: #3A4351;
+    --text: #E8ECF1;
+    --text-secondary: #A7B0BE;
+    --text-muted: #6E7787;
+    --local: #6FCBA1; --local-bg: #16261E; --local-border: #2C4A3A;
+    --remote: #86ADF5; --remote-bg: #131E30; --remote-border: #28405F;
+    --federated: #C6A2ED; --federated-bg: #201730; --federated-border: #3D2B57;
+    --virtual: #F0B36B; --virtual-bg: #2A1F0F; --virtual-border: #4D3A1C;
+    --danger: #F0837A; --danger-bg: #2C1512; --danger-border: #55251F;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--font-ui); }
+  .app { max-width: 1180px; margin: 0 auto; padding: 28px 20px 60px; }
+  .top { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; flex-wrap: wrap; margin-bottom: 22px; }
+  h1 { font-size: 22px; font-weight: 600; margin: 0 0 4px; letter-spacing: -0.01em; }
+  .subtitle { font-size: 13.5px; color: var(--text-secondary); margin: 0; max-width: 46ch; }
+  .source-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .source-label { font-size: 12.5px; color: var(--text-muted); font-family: var(--font-mono); }
+  input[type=file] { display: none; }
+  .btn { font-family: var(--font-ui); font-size: 13px; font-weight: 500; padding: 8px 14px; border-radius: var(--radius); border: 1px solid var(--border-strong); background: var(--panel); color: var(--text); cursor: pointer; white-space: nowrap; }
+  .btn:hover { background: var(--panel-raised); border-color: var(--text-secondary); }
+  .btn:focus-visible, a:focus-visible, li[tabindex]:focus-visible { outline: 2px solid var(--remote); outline-offset: 2px; }
+  .tabs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 14px; }
+  .tab { border-radius: var(--radius); border: 1px solid var(--border); background: var(--panel); padding: 12px 14px; cursor: pointer; text-align: left; font-family: var(--font-ui); }
+  .tab .n { font-family: var(--font-mono); font-size: 22px; font-weight: 500; display: block; margin-bottom: 2px; }
+  .tab .l { font-size: 12.5px; color: var(--text-secondary); }
+  .tab[data-active="true"] { border-color: var(--type-color); background: var(--type-bg); }
+  .tab[data-active="true"] .n { color: var(--type-color); }
+  .tab-local { --type-color: var(--local); --type-bg: var(--local-bg); }
+  .tab-remote { --type-color: var(--remote); --type-bg: var(--remote-bg); }
+  .tab-federated { --type-color: var(--federated); --type-bg: var(--federated-bg); }
+  .tab-virtual { --type-color: var(--virtual); --type-bg: var(--virtual-bg); }
+  .cycle-banner { border: 1px solid var(--danger-border); background: var(--danger-bg); color: var(--danger); border-radius: var(--radius); padding: 12px 14px; margin-bottom: 16px; font-size: 13.5px; }
+  .cycle-banner strong { display: block; margin-bottom: 6px; font-weight: 600; }
+  .cycle-chain { font-family: var(--font-mono); font-size: 12.5px; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+  .cycle-chain-row { margin: 3px 0; }
+  .grid { display: grid; grid-template-columns: 300px 1fr; gap: 16px; align-items: start; }
+  @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); }
+  .list-panel { padding: 12px; }
+  .search { width: 100%; font-family: var(--font-ui); font-size: 13.5px; padding: 8px 10px; border-radius: var(--radius); border: 1px solid var(--border-strong); background: var(--bg); color: var(--text); margin-bottom: 10px; }
+  .search:focus-visible { outline: 2px solid var(--remote); outline-offset: 1px; }
+  .list { list-style: none; margin: 0; padding: 0; max-height: 560px; overflow-y: auto; }
+  .list li { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 8px; border-radius: 4px; cursor: pointer; font-family: var(--font-mono); font-size: 13px; }
+  .list li:hover { background: var(--bg); }
+  .list li[data-selected="true"] { background: var(--type-bg); color: var(--type-color); }
+  .list li .key { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .list li .badge { font-size: 11px; color: var(--text-muted); flex-shrink: 0; }
+  .list li[data-warn="true"] .key::before { content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--danger); margin-right: 6px; }
+  .empty-list { padding: 24px 8px; text-align: center; color: var(--text-muted); font-size: 13px; }
+  .detail-panel { padding: 20px 22px; min-height: 420px; }
+  .breadcrumb { font-size: 12px; color: var(--text-muted); font-family: var(--font-mono); margin-bottom: 14px; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+  .breadcrumb span.sep { color: var(--text-muted); }
+  .breadcrumb a { color: var(--text-secondary); text-decoration: none; cursor: pointer; }
+  .breadcrumb a:hover { text-decoration: underline; }
+  .detail-header { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 4px; }
+  .detail-key { font-family: var(--font-mono); font-size: 19px; font-weight: 500; word-break: break-word; }
+  .type-badge { font-size: 11px; font-weight: 500; padding: 3px 8px; border-radius: 4px; text-transform: uppercase; letter-spacing: 0.03em; }
+  .type-badge.local { color: var(--local); background: var(--local-bg); border: 1px solid var(--local-border); }
+  .type-badge.remote { color: var(--remote); background: var(--remote-bg); border: 1px solid var(--remote-border); }
+  .type-badge.federated { color: var(--federated); background: var(--federated-bg); border: 1px solid var(--federated-border); }
+  .type-badge.virtual { color: var(--virtual); background: var(--virtual-bg); border: 1px solid var(--virtual-border); }
+  .pkg { font-size: 12.5px; color: var(--text-muted); margin: 0 0 18px; }
+  .warn-block { border: 1px solid var(--danger-border); background: var(--danger-bg); color: var(--danger); border-radius: var(--radius); padding: 10px 12px; font-size: 13px; margin-bottom: 18px; }
+  .warn-block .chain { font-family: var(--font-mono); font-size: 12.5px; margin-top: 4px; }
+  .stats { display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; }
+  .stat { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 12px; }
+  .stat .v { font-family: var(--font-mono); font-size: 16px; font-weight: 500; }
+  .stat .l { font-size: 11.5px; color: var(--text-muted); }
+  .section-title { font-size: 12.5px; font-weight: 500; color: var(--text-secondary); margin: 0 0 8px; }
+  .rel-list { list-style: none; margin: 0 0 22px; padding: 0; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+  .rel-list li { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 12px; font-family: var(--font-mono); font-size: 13px; cursor: pointer; border-top: 1px solid var(--border); }
+  .rel-list li:first-child { border-top: none; }
+  .rel-list li:hover { background: var(--bg); }
+  .rel-list li .chev { color: var(--text-muted); font-family: var(--font-ui); }
+  .rel-empty { font-size: 13px; color: var(--text-muted); padding: 10px 0 20px; }
+  .placeholder { color: var(--text-muted); font-size: 13.5px; padding: 60px 0; text-align: center; }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="top">
+    <div>
+      <h1>Repository map</h1>
+      <p class="subtitle">Browse local, remote, federated and virtual repos and trace how virtuals reference each other.</p>
+    </div>
+    <div class="source-row">
+      <span class="source-label" id="sourceLabel">No data loaded</span>
+      <button class="btn" id="uploadBtn">Upload CSV</button>
+      <input type="file" id="fileInput" accept=".csv">
+    </div>
+  </div>
+
+  <div class="tabs" id="tabs"></div>
+  <div id="cycleBanner"></div>
+
+  <div class="grid">
+    <div class="panel list-panel">
+      <input class="search" id="search" type="text" placeholder="Search repo keys">
+      <ul class="list" id="list"></ul>
+    </div>
+    <div class="panel detail-panel" id="detail"></div>
+  </div>
+</div>
+
+<script>
+
+var state = {
+  rows: [],
+  byKey: {},
+  parentOf: {},
+  cycles: [],
+  cycleNodes: {},
+  currentTab: 'LOCAL',
+  search: '',
+  selectedKey: null,
+  breadcrumb: [],
+  isSample: true
+};
+
+function parseCsvLine(line) {
+  var out = []; var cur = ''; var inQ = false;
+  for (var i = 0; i < line.length; i++) {
+    var c = line[i];
+    if (inQ) {
+      if (c === '"' && line[i+1] === '"') { cur += '"'; i++; }
+      else if (c === '"') { inQ = false; }
+      else { cur += c; }
+    } else {
+      if (c === '"') inQ = true;
+      else if (c === ',') { out.push(cur); cur = ''; }
+      else cur += c;
+    }
+  }
+  out.push(cur);
+  return out;
+}
+
+function parseCsv(text) {
+  var lines = text.replace(/\r\n/g, '\n').split('\n').filter(function(l){ return l.trim().length > 0; });
+  if (!lines.length) return [];
+  var header = parseCsvLine(lines[0]).map(function(h){ return h.trim().toLowerCase(); });
+  var idxKey = header.indexOf('key');
+  var idxType = header.indexOf('type');
+  var idxPkg = header.indexOf('package_type');
+  var idxMembers = header.indexOf('members');
+  var rows = [];
+  for (var i = 1; i < lines.length; i++) {
+    var cells = parseCsvLine(lines[i]);
+    var key = (cells[idxKey] || '').trim();
+    if (!key) continue;
+    var type = (cells[idxType] || '').trim().toUpperCase();
+    var pkg = idxPkg >= 0 ? (cells[idxPkg] || '').trim() : '';
+    var membersRaw = idxMembers >= 0 ? (cells[idxMembers] || '').trim() : '';
+    var members = membersRaw ? membersRaw.split(';').map(function(m){ return m.trim(); }).filter(Boolean) : [];
+    rows.push({ key: key, type: type, packageType: pkg, members: members });
+  }
+  return rows;
+}
+
+function analyze(rows) {
+  var byKey = {};
+  rows.forEach(function(r){ byKey[r.key] = r; });
+  var virtualKeys = {};
+  rows.forEach(function(r){ if (r.type === 'VIRTUAL') virtualKeys[r.key] = true; });
+
+  var g = {};
+  rows.forEach(function(r){
+    if (r.type !== 'VIRTUAL') return;
+    g[r.key] = (r.members || []).filter(function(m){ return virtualKeys[m]; });
+  });
+
+  var parentOf = {};
+  rows.forEach(function(r){
+    (r.members || []).forEach(function(m){
+      if (!parentOf[m]) parentOf[m] = [];
+      parentOf[m].push(r.key);
+    });
+  });
+
+  var rawCycles = [];
+  Object.keys(g).forEach(function(start){
+    (function walk(node, stack) {
+      var i = stack.indexOf(node);
+      if (i !== -1) { rawCycles.push(stack.slice(i).concat([node])); return; }
+      if (stack.length > 60) return;
+      (g[node] || []).forEach(function(next){ walk(next, stack.concat([node])); });
+    })(start, []);
+  });
+
+  var normSeen = {};
+  var cycles = [];
+  rawCycles.forEach(function(c){
+    var trimmed = c.slice(0, -1);
+    var minIdx = 0;
+    for (var i = 1; i < trimmed.length; i++) { if (trimmed[i] < trimmed[minIdx]) minIdx = i; }
+    var rotated = trimmed.slice(minIdx).concat(trimmed.slice(0, minIdx));
+    var sig = rotated.join('\u0001');
+    if (!normSeen[sig]) { normSeen[sig] = true; cycles.push(rotated); }
+  });
+
+  var cycleNodes = {};
+  cycles.forEach(function(c){ c.forEach(function(k){ cycleNodes[k] = true; }); });
+
+  return { byKey: byKey, virtualKeys: virtualKeys, g: g, parentOf: parentOf, cycles: cycles, cycleNodes: cycleNodes };
+}
+
+function loadRows(rows, isSample, label) {
+  state.rows = rows;
+  var a = analyze(rows);
+  state.byKey = a.byKey;
+  state.parentOf = a.parentOf;
+  state.cycles = a.cycles;
+  state.cycleNodes = a.cycleNodes;
+  state.g = a.g;
+  state.isSample = isSample;
+  state.selectedKey = null;
+  state.breadcrumb = [];
+  document.getElementById('sourceLabel').textContent = label;
+  renderAll();
+}
+
+function typeClass(t) { return t ? t.toLowerCase() : 'local'; }
+
+function countByType(t) {
+  return state.rows.filter(function(r){ return r.type === t; }).length;
+}
+
+function renderTabs() {
+  var tabs = [
+    { t: 'LOCAL', label: 'Local' },
+    { t: 'REMOTE', label: 'Remote' },
+    { t: 'FEDERATED', label: 'Federated' },
+    { t: 'VIRTUAL', label: 'Virtual' }
+  ];
+  var html = tabs.map(function(tab){
+    var active = state.currentTab === tab.t;
+    return '<button type="button" class="tab tab-' + typeClass(tab.t) + '" data-tab="' + tab.t + '" data-active="' + active + '">' +
+      '<span class="n">' + countByType(tab.t) + '</span>' +
+      '<span class="l">' + tab.label + '</span>' +
+      '</button>';
+  }).join('');
+  document.getElementById('tabs').innerHTML = html;
+  Array.prototype.forEach.call(document.querySelectorAll('[data-tab]'), function(el){
+    el.addEventListener('click', function(){
+      state.currentTab = el.getAttribute('data-tab');
+      renderTabs(); renderList();
+    });
+  });
+}
+
+function renderCycleBanner() {
+  var el = document.getElementById('cycleBanner');
+  if (!state.cycles.length) { el.innerHTML = ''; return; }
+  var rows = state.cycles.map(function(c){
+    var chain = c.concat([c[0]]).join(' \u2192 ');
+    return '<div class="cycle-chain-row"><span class="cycle-chain" data-jump="' + c[0] + '">' + chain + '</span></div>';
+  }).join('');
+  el.innerHTML = '<div class="cycle-banner"><strong>' + state.cycles.length + ' circular reference' + (state.cycles.length > 1 ? 's' : '') + ' detected</strong>' + rows + '</div>';
+  Array.prototype.forEach.call(el.querySelectorAll('[data-jump]'), function(a){
+    a.addEventListener('click', function(){ selectRepo(a.getAttribute('data-jump'), true); });
+  });
+}
+
+function renderList() {
+  var list = document.getElementById('list');
+  var rows = state.rows.filter(function(r){ return r.type === state.currentTab; });
+  if (state.search.trim()) {
+    var q = state.search.trim().toLowerCase();
+    rows = rows.filter(function(r){ return r.key.toLowerCase().indexOf(q) !== -1; });
+  }
+  rows.sort(function(a, b){ return a.key.localeCompare(b.key); });
+  if (!rows.length) {
+    var msg = state.rows.length === 0 ? 'No CSV loaded yet.' : 'No repositories match.';
+    list.innerHTML = '<li class="empty-list" style="cursor:default;">' + msg + '</li>';
+    return;
+  }
+  var html = rows.map(function(r){
+    var warn = state.cycleNodes[r.key] ? 'true' : 'false';
+    var badge = r.type === 'VIRTUAL' ? (r.members || []).length + ' member' + ((r.members||[]).length === 1 ? '' : 's') : (((state.parentOf[r.key]||[]).length) + ' virtual' + (((state.parentOf[r.key]||[]).length) === 1 ? '' : 's'));
+    var selected = state.selectedKey === r.key;
+    return '<li data-key="' + r.key + '" data-selected="' + selected + '" data-warn="' + warn + '" class="tab-' + typeClass(r.type) + '" tabindex="0">' +
+      '<span class="key">' + r.key + '</span><span class="badge">' + badge + '</span></li>';
+  }).join('');
+  list.innerHTML = html;
+  Array.prototype.forEach.call(list.querySelectorAll('[data-key]'), function(li){
+    li.addEventListener('click', function(){ selectRepo(li.getAttribute('data-key'), true); });
+    li.addEventListener('keydown', function(e){ if (e.key === 'Enter') selectRepo(li.getAttribute('data-key'), true); });
+  });
+}
+
+function selectRepo(key, pushCrumb) {
+  if (!state.byKey[key]) return;
+  if (pushCrumb) {
+    var idx = state.breadcrumb.indexOf(key);
+    if (idx !== -1) state.breadcrumb = state.breadcrumb.slice(0, idx + 1);
+    else state.breadcrumb = state.breadcrumb.concat([key]);
+  }
+  state.selectedKey = key;
+  state.currentTab = state.byKey[key].type;
+  renderTabs(); renderList(); renderDetail();
+}
+
+function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
+
+function renderDetail() {
+  var el = document.getElementById('detail');
+  if (!state.selectedKey || !state.byKey[state.selectedKey]) {
+    var msg = state.rows.length === 0
+      ? 'Upload a CSV to explore your repositories.'
+      : 'Select a repository to see its relationships.';
+    el.innerHTML = '<div class="placeholder">' + msg + '</div>';
+    return;
+  }
+  var r = state.byKey[state.selectedKey];
+  var tCls = typeClass(r.type);
+
+  var crumbHtml = '';
+  if (state.breadcrumb.length > 1) {
+    crumbHtml = '<div class="breadcrumb">' + state.breadcrumb.map(function(k, i){
+      var isLast = i === state.breadcrumb.length - 1;
+      if (isLast) return '<span>' + esc(k) + '</span>';
+      return '<a data-crumb="' + esc(k) + '">' + esc(k) + '</a><span class="sep">/</span>';
+    }).join('') + '</div>';
+  }
+
+  var cycleWarn = '';
+  var myCycles = state.cycles.filter(function(c){ return c.indexOf(r.key) !== -1; });
+  if (myCycles.length) {
+    cycleWarn = '<div class="warn-block">Part of a circular reference' + (myCycles.length > 1 ? 's' : '') + '.' +
+      myCycles.map(function(c){ return '<div class="chain">' + c.concat([c[0]]).join(' \u2192 ') + '</div>'; }).join('') + '</div>';
+  }
+
+  var memberCount = (r.members || []).length;
+  var virtualMembers = (r.members || []).filter(function(m){ return state.virtualKeysCheck(m); });
+  var parents = state.parentOf[r.key] || [];
+
+  var statsHtml = '<div class="stats">';
+  if (r.type === 'VIRTUAL') {
+    statsHtml += statCard(memberCount, 'members') + statCard(virtualMembersCount(r), 'nested virtuals');
+  }
+  statsHtml += statCard(parents.length, 'used by');
+  statsHtml += '</div>';
+
+  var containsHtml = '';
+  if (r.type === 'VIRTUAL') {
+    containsHtml = '<p class="section-title">Contains</p>';
+    if (!memberCount) {
+      containsHtml += '<div class="rel-empty">No members configured.</div>';
+    } else {
+      containsHtml += '<ul class="rel-list">' + r.members.map(function(m){
+        var mRow = state.byKey[m];
+        var mType = mRow ? mRow.type : null;
+        var isVirtual = mType === 'VIRTUAL';
+        return '<li' + (mRow ? ' data-key="' + esc(m) + '"' : '') + '>' +
+          '<span>' + typeBadge(mType) + ' <span style="margin-left:8px;">' + esc(m) + '</span></span>' +
+          (isVirtual ? '<span class="chev">view</span>' : (mRow ? '' : '<span class="chev">not in data</span>')) +
+          '</li>';
+      }).join('') + '</ul>';
+    }
+  }
+
+  var usedByHtml = '<p class="section-title">Used by</p>';
+  if (!parents.length) {
+    usedByHtml += '<div class="rel-empty">Not referenced by any virtual repository.</div>';
+  } else {
+    usedByHtml += '<ul class="rel-list">' + parents.slice().sort().map(function(p){
+      return '<li data-key="' + esc(p) + '"><span>' + typeBadge('VIRTUAL') + ' <span style="margin-left:8px;">' + esc(p) + '</span></span><span class="chev">view</span></li>';
+    }).join('') + '</ul>';
+  }
+
+  el.innerHTML = crumbHtml +
+    '<div class="detail-header"><span class="detail-key">' + esc(r.key) + '</span>' + typeBadge(r.type) + '</div>' +
+    '<p class="pkg">' + esc(r.packageType || 'unspecified package type') + '</p>' +
+    cycleWarn + statsHtml + containsHtml + usedByHtml;
+
+  Array.prototype.forEach.call(el.querySelectorAll('[data-crumb]'), function(a){
+    a.addEventListener('click', function(){ selectRepo(a.getAttribute('data-crumb'), true); });
+  });
+  Array.prototype.forEach.call(el.querySelectorAll('.rel-list [data-key]'), function(li){
+    li.addEventListener('click', function(){ selectRepo(li.getAttribute('data-key'), true); });
+  });
+}
+
+function virtualMembersCount(r) {
+  return (r.members || []).filter(function(m){ return state.virtualKeysCheck(m); }).length;
+}
+state.virtualKeysCheck = function(m) { return !!(state.byKey[m] && state.byKey[m].type === 'VIRTUAL'); };
+
+function statCard(v, l) {
+  return '<div class="stat"><div class="v">' + v + '</div><div class="l">' + l + '</div></div>';
+}
+function typeBadge(t) {
+  if (!t) return '<span class="type-badge" style="color:var(--text-muted);background:transparent;border:1px solid var(--border);">unknown</span>';
+  return '<span class="type-badge ' + typeClass(t) + '">' + t.toLowerCase() + '</span>';
+}
+
+function renderAll() {
+  renderTabs();
+  renderCycleBanner();
+  renderList();
+  renderDetail();
+}
+
+document.getElementById('search').addEventListener('input', function(e){
+  state.search = e.target.value;
+  renderList();
+});
+
+document.getElementById('uploadBtn').addEventListener('click', function(){
+  document.getElementById('fileInput').click();
+});
+document.getElementById('fileInput').addEventListener('change', function(e){
+  var file = e.target.files[0];
+  if (!file) return;
+  var reader = new FileReader();
+  reader.onload = function(evt){
+    try {
+      var rows = parseCsv(evt.target.result);
+      if (!rows.length) { alert('No rows found in that CSV.'); return; }
+      loadRows(rows, false, file.name + ' \u00b7 ' + rows.length + ' repos');
+    } catch (err) {
+      alert('Could not read that file as CSV.');
+    }
+  };
+  reader.readAsText(file);
+});
+
+loadRows([], true, 'No data loaded');
+</script>
+</body>
+</html>

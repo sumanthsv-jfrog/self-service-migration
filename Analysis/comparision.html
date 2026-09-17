@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Repository comparison</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #F5F6F8;
+    --panel: #FFFFFF;
+    --border: #DDE1E7;
+    --border-strong: #C3C9D2;
+    --text: #171A21;
+    --text-secondary: #4B5563;
+    --text-muted: #8A93A3;
+    --both: #B36B00; --both-bg: #FBF0DD; --both-border: #EFCE8F;
+    --only1: #1E8F63; --only1-bg: #E4F5EC; --only1-border: #A9DBC2;
+    --only2: #2F6FE4; --only2-bg: #E7F0FE; --only2-border: #B4CDF7;
+    --danger: #C43D33; --danger-bg: #FBEAE8; --danger-border: #F0BAB4;
+    --radius: 6px;
+    --font-ui: 'Space Grotesk', sans-serif;
+    --font-mono: 'IBM Plex Mono', monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12151B; --panel: #171B23; --border: #2A313D; --border-strong: #3A4351;
+      --text: #E8ECF1; --text-secondary: #A7B0BE; --text-muted: #6E7787;
+      --both: #F0B36B; --both-bg: #2A1F0F; --both-border: #4D3A1C;
+      --only1: #6FCBA1; --only1-bg: #16261E; --only1-border: #2C4A3A;
+      --only2: #86ADF5; --only2-bg: #131E30; --only2-border: #28405F;
+      --danger: #F0837A; --danger-bg: #2C1512; --danger-border: #55251F;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #12151B; --panel: #171B23; --border: #2A313D; --border-strong: #3A4351;
+    --text: #E8ECF1; --text-secondary: #A7B0BE; --text-muted: #6E7787;
+    --both: #F0B36B; --both-bg: #2A1F0F; --both-border: #4D3A1C;
+    --only1: #6FCBA1; --only1-bg: #16261E; --only1-border: #2C4A3A;
+    --only2: #86ADF5; --only2-bg: #131E30; --only2-border: #28405F;
+    --danger: #F0837A; --danger-bg: #2C1512; --danger-border: #55251F;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--font-ui); }
+  .app { max-width: 1180px; margin: 0 auto; padding: 28px 20px 60px; }
+  .top { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; flex-wrap: wrap; margin-bottom: 22px; }
+  h1 { font-size: 22px; font-weight: 600; margin: 0 0 4px; letter-spacing: -0.01em; }
+  .subtitle { font-size: 13.5px; color: var(--text-secondary); margin: 0; max-width: 50ch; }
+  .source-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .source-label { font-size: 12.5px; color: var(--text-muted); font-family: var(--font-mono); }
+  input[type=file] { display: none; }
+  .btn { font-family: var(--font-ui); font-size: 13px; font-weight: 500; padding: 8px 14px; border-radius: var(--radius); border: 1px solid var(--border-strong); background: var(--panel); color: var(--text); cursor: pointer; white-space: nowrap; }
+  .btn:hover { background: var(--bg); border-color: var(--text-secondary); }
+  .btn:focus-visible, a:focus-visible, li[tabindex]:focus-visible { outline: 2px solid var(--only2); outline-offset: 2px; }
+  .tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 14px; }
+  .tab { border-radius: var(--radius); border: 1px solid var(--border); background: var(--panel); padding: 12px 14px; cursor: pointer; text-align: left; font-family: var(--font-ui); }
+  .tab .n { font-family: var(--font-mono); font-size: 22px; font-weight: 500; display: block; margin-bottom: 2px; }
+  .tab .l { font-size: 12.5px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tab[data-active="true"] { border-color: var(--tab-color); background: var(--tab-bg); }
+  .tab[data-active="true"] .n { color: var(--tab-color); }
+  .tab-both { --tab-color: var(--both); --tab-bg: var(--both-bg); }
+  .tab-only1 { --tab-color: var(--only1); --tab-bg: var(--only1-bg); }
+  .tab-only2 { --tab-color: var(--only2); --tab-bg: var(--only2-bg); }
+  .mismatch-toggle { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-secondary); margin-bottom: 14px; cursor: pointer; user-select: none; }
+  .mismatch-toggle input { cursor: pointer; }
+  .mismatch-toggle .count { font-family: var(--font-mono); color: var(--danger); font-weight: 500; }
+  .grid { display: grid; grid-template-columns: 300px 1fr; gap: 16px; align-items: start; }
+  @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); }
+  .list-panel { padding: 12px; }
+  .search { width: 100%; font-family: var(--font-ui); font-size: 13.5px; padding: 8px 10px; border-radius: var(--radius); border: 1px solid var(--border-strong); background: var(--bg); color: var(--text); margin-bottom: 10px; }
+  .search:focus-visible { outline: 2px solid var(--only2); outline-offset: 1px; }
+  .list { list-style: none; margin: 0; padding: 0; max-height: 560px; overflow-y: auto; }
+  .list li { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 8px; border-radius: 4px; cursor: pointer; font-family: var(--font-mono); font-size: 13px; }
+  .list li:hover { background: var(--bg); }
+  .list li[data-selected="true"] { background: var(--tab-bg); color: var(--tab-color); }
+  .list li .key { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .list li .badge { font-size: 11px; color: var(--text-muted); flex-shrink: 0; }
+  .list li[data-warn="true"] .key::before { content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--danger); margin-right: 6px; }
+  .empty-list { padding: 24px 8px; text-align: center; color: var(--text-muted); font-size: 13px; }
+  .detail-panel { padding: 20px 22px; min-height: 420px; }
+  .detail-header { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
+  .detail-key { font-family: var(--font-mono); font-size: 19px; font-weight: 500; word-break: break-word; }
+  .status-badge { font-size: 11px; font-weight: 500; padding: 3px 8px; border-radius: 4px; text-transform: uppercase; letter-spacing: 0.03em; }
+  .status-badge.both { color: var(--both); background: var(--both-bg); border: 1px solid var(--both-border); }
+  .status-badge.only1 { color: var(--only1); background: var(--only1-bg); border: 1px solid var(--only1-border); }
+  .status-badge.only2 { color: var(--only2); background: var(--only2-bg); border: 1px solid var(--only2-border); }
+  .warn-block { border: 1px solid var(--danger-border); background: var(--danger-bg); color: var(--danger); border-radius: var(--radius); padding: 10px 12px; font-size: 13px; margin-bottom: 18px; }
+  .compare-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 8px; }
+  .compare-col { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; }
+  .compare-col .inst-label { font-size: 11.5px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 8px; }
+  .compare-row { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; padding: 4px 0; }
+  .compare-row .l { color: var(--text-secondary); }
+  .compare-row .v { font-family: var(--font-mono); }
+  .compare-row .v.absent { color: var(--text-muted); font-style: italic; }
+  .placeholder { color: var(--text-muted); font-size: 13.5px; padding: 60px 0; text-align: center; }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="top">
+    <div>
+      <h1>Repository comparison</h1>
+      <p class="subtitle">Find repo keys that exist in both instances, and ones unique to each.</p>
+    </div>
+    <div class="source-row">
+      <span class="source-label" id="sourceLabel">No data loaded</span>
+      <button class="btn" id="uploadBtn">Upload CSV</button>
+      <input type="file" id="fileInput" accept=".csv">
+    </div>
+  </div>
+
+  <div class="tabs" id="tabs"></div>
+  <label class="mismatch-toggle" id="mismatchToggleWrap" style="display:none;">
+    <input type="checkbox" id="mismatchOnly">
+    <span>Show only type mismatches (<span class="count" id="mismatchCount">0</span>)</span>
+  </label>
+
+  <div class="grid">
+    <div class="panel list-panel">
+      <input class="search" id="search" type="text" placeholder="Search repo keys">
+      <ul class="list" id="list"></ul>
+    </div>
+    <div class="panel detail-panel" id="detail"></div>
+  </div>
+</div>
+
+<script>
+var state = {
+  rows: [],
+  label1: 'instance 1',
+  label2: 'instance 2',
+  currentTab: 'both',
+  search: '',
+  mismatchOnly: false,
+  selectedKey: null
+};
+
+function parseCsvLine(line) {
+  var out = []; var cur = ''; var inQ = false;
+  for (var i = 0; i < line.length; i++) {
+    var c = line[i];
+    if (inQ) {
+      if (c === '"' && line[i+1] === '"') { cur += '"'; i++; }
+      else if (c === '"') { inQ = false; }
+      else { cur += c; }
+    } else {
+      if (c === '"') inQ = true;
+      else if (c === ',') { out.push(cur); cur = ''; }
+      else cur += c;
+    }
+  }
+  out.push(cur);
+  return out;
+}
+
+function parseCsv(text) {
+  var lines = text.replace(/\r\n/g, '\n').split('\n').filter(function(l){ return l.trim().length > 0; });
+  if (!lines.length) return { rows: [], label1: 'instance 1', label2: 'instance 2' };
+  var header = parseCsvLine(lines[0]).map(function(h){ return h.trim(); });
+  var lowerHeader = header.map(function(h){ return h.toLowerCase(); });
+
+  var idxKey = lowerHeader.indexOf('key');
+  var idxStatus = lowerHeader.indexOf('status');
+  var idxMismatch = lowerHeader.indexOf('type_mismatch');
+
+  var typeCols = [];
+  var pkgCols = [];
+  header.forEach(function(h, i){
+    var lh = lowerHeader[i];
+    if (lh === 'type_mismatch' || lh === 'key' || lh === 'status') return;
+    if (/_package_type$/.test(lh)) pkgCols.push(i);
+    else if (/_type$/.test(lh)) typeCols.push(i);
+  });
+
+  var label1 = 'instance 1', label2 = 'instance 2';
+  if (typeCols.length >= 2) {
+    label1 = header[typeCols[0]].replace(/_type$/i, '').replace(/_/g, ' ');
+    label2 = header[typeCols[1]].replace(/_type$/i, '').replace(/_/g, ' ');
+  }
+  var idxType1 = typeCols[0], idxType2 = typeCols[1];
+  var idxPkg1 = pkgCols[0], idxPkg2 = pkgCols[1];
+
+  var rows = [];
+  for (var i = 1; i < lines.length; i++) {
+    var cells = parseCsvLine(lines[i]);
+    var key = idxKey >= 0 ? (cells[idxKey] || '').trim() : '';
+    if (!key) continue;
+    var status = idxStatus >= 0 ? (cells[idxStatus] || '').trim() : '';
+    var normStatus = 'both';
+    if (status.toLowerCase() === 'both') {
+      normStatus = 'both';
+    } else if (status.indexOf('only_') === 0) {
+      var rest = status.slice(5);
+      normStatus = (rest === label1) ? 'only1' : 'only2';
+    }
+    rows.push({
+      key: key,
+      status: normStatus,
+      type1: idxType1 != null ? (cells[idxType1] || '').trim() : '',
+      type2: idxType2 != null ? (cells[idxType2] || '').trim() : '',
+      pkg1: idxPkg1 != null ? (cells[idxPkg1] || '').trim() : '',
+      pkg2: idxPkg2 != null ? (cells[idxPkg2] || '').trim() : '',
+      mismatch: idxMismatch >= 0 ? (cells[idxMismatch] || '').trim().toLowerCase() === 'true' : false
+    });
+  }
+  return { rows: rows, label1: label1, label2: label2 };
+}
+
+function loadData(parsed, label) {
+  state.rows = parsed.rows;
+  state.label1 = parsed.label1;
+  state.label2 = parsed.label2;
+  state.selectedKey = null;
+  state.mismatchOnly = false;
+  document.getElementById('mismatchOnly').checked = false;
+  document.getElementById('sourceLabel').textContent = label;
+  renderAll();
+}
+
+function countByStatus(s) { return state.rows.filter(function(r){ return r.status === s; }).length; }
+function mismatchCount() { return state.rows.filter(function(r){ return r.mismatch; }).length; }
+
+function renderTabs() {
+  var tabs = [
+    { s: 'both', cls: 'tab-both', label: 'Duplicates (in both)' },
+    { s: 'only1', cls: 'tab-only1', label: 'Only in ' + state.label1 },
+    { s: 'only2', cls: 'tab-only2', label: 'Only in ' + state.label2 }
+  ];
+  document.getElementById('tabs').innerHTML = tabs.map(function(t){
+    var active = state.currentTab === t.s;
+    return '<button type="button" class="tab ' + t.cls + '" data-tab="' + t.s + '" data-active="' + active + '">' +
+      '<span class="n">' + countByStatus(t.s) + '</span><span class="l">' + esc(t.label) + '</span></button>';
+  }).join('');
+  Array.prototype.forEach.call(document.querySelectorAll('[data-tab]'), function(el){
+    el.addEventListener('click', function(){
+      state.currentTab = el.getAttribute('data-tab');
+      renderTabs(); renderMismatchToggle(); renderList();
+    });
+  });
+}
+
+function renderMismatchToggle() {
+  var wrap = document.getElementById('mismatchToggleWrap');
+  var mc = mismatchCount();
+  if (state.currentTab !== 'both' || mc === 0) { wrap.style.display = 'none'; return; }
+  wrap.style.display = 'flex';
+  document.getElementById('mismatchCount').textContent = mc;
+}
+
+function renderList() {
+  var list = document.getElementById('list');
+  var rows = state.rows.filter(function(r){ return r.status === state.currentTab; });
+  if (state.currentTab === 'both' && state.mismatchOnly) {
+    rows = rows.filter(function(r){ return r.mismatch; });
+  }
+  if (state.search.trim()) {
+    var q = state.search.trim().toLowerCase();
+    rows = rows.filter(function(r){ return r.key.toLowerCase().indexOf(q) !== -1; });
+  }
+  rows.sort(function(a, b){ return a.key.localeCompare(b.key); });
+  if (!rows.length) {
+    var msg = state.rows.length === 0 ? 'No CSV loaded yet.' : 'No repositories match.';
+    list.innerHTML = '<li class="empty-list" style="cursor:default;">' + msg + '</li>';
+    return;
+  }
+  var tabCls = 'tab-' + state.currentTab;
+  var html = rows.map(function(r){
+    var badge = r.status === 'both' ? (r.type1 || r.type2) : (r.status === 'only1' ? r.type1 : r.type2);
+    var selected = state.selectedKey === r.key;
+    return '<li data-key="' + esc(r.key) + '" data-selected="' + selected + '" data-warn="' + (r.mismatch ? 'true' : 'false') + '" class="' + tabCls + '" tabindex="0">' +
+      '<span class="key">' + esc(r.key) + '</span><span class="badge">' + esc((badge || '').toLowerCase()) + '</span></li>';
+  }).join('');
+  list.innerHTML = html;
+  Array.prototype.forEach.call(list.querySelectorAll('[data-key]'), function(li){
+    li.addEventListener('click', function(){ selectRepo(li.getAttribute('data-key')); });
+    li.addEventListener('keydown', function(e){ if (e.key === 'Enter') selectRepo(li.getAttribute('data-key')); });
+  });
+}
+
+function selectRepo(key) {
+  state.selectedKey = key;
+  renderList();
+  renderDetail();
+}
+
+function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
+
+function statusBadge(status) {
+  if (status === 'both') return '<span class="status-badge both">duplicate</span>';
+  if (status === 'only1') return '<span class="status-badge only1">only in ' + esc(state.label1) + '</span>';
+  return '<span class="status-badge only2">only in ' + esc(state.label2) + '</span>';
+}
+
+function valOrAbsent(v) {
+  return v ? '<span class="v">' + esc(v.toLowerCase()) + '</span>' : '<span class="v absent">not present</span>';
+}
+
+function renderDetail() {
+  var el = document.getElementById('detail');
+  var r = state.rows.find(function(x){ return x.key === state.selectedKey; });
+  if (!r) {
+    var msg = state.rows.length === 0 ? 'Upload a comparison CSV to get started.' : 'Select a repository to see details.';
+    el.innerHTML = '<div class="placeholder">' + msg + '</div>';
+    return;
+  }
+
+  var warn = '';
+  if (r.mismatch) {
+    warn = '<div class="warn-block">Same key exists in both instances but with a different type: ' +
+      esc(r.type1 || '\u2014') + ' vs ' + esc(r.type2 || '\u2014') + '.</div>';
+  }
+
+  var col1 = '<div class="compare-col"><div class="inst-label">' + esc(state.label1) + '</div>' +
+    '<div class="compare-row"><span class="l">Type</span>' + valOrAbsent(r.type1) + '</div>' +
+    '<div class="compare-row"><span class="l">Package type</span>' + valOrAbsent(r.pkg1) + '</div></div>';
+  var col2 = '<div class="compare-col"><div class="inst-label">' + esc(state.label2) + '</div>' +
+    '<div class="compare-row"><span class="l">Type</span>' + valOrAbsent(r.type2) + '</div>' +
+    '<div class="compare-row"><span class="l">Package type</span>' + valOrAbsent(r.pkg2) + '</div></div>';
+
+  el.innerHTML =
+    '<div class="detail-header"><span class="detail-key">' + esc(r.key) + '</span>' + statusBadge(r.status) + '</div>' +
+    warn +
+    '<div class="compare-grid">' + col1 + col2 + '</div>';
+}
+
+function renderAll() {
+  renderTabs();
+  renderMismatchToggle();
+  renderList();
+  renderDetail();
+}
+
+document.getElementById('search').addEventListener('input', function(e){
+  state.search = e.target.value;
+  renderList();
+});
+document.getElementById('mismatchOnly').addEventListener('change', function(e){
+  state.mismatchOnly = e.target.checked;
+  renderList();
+});
+document.getElementById('uploadBtn').addEventListener('click', function(){
+  document.getElementById('fileInput').click();
+});
+document.getElementById('fileInput').addEventListener('change', function(e){
+  var file = e.target.files[0];
+  if (!file) return;
+  var reader = new FileReader();
+  reader.onload = function(evt){
+    try {
+      var parsed = parseCsv(evt.target.result);
+      if (!parsed.rows.length) { alert('No rows found in that CSV.'); return; }
+      loadData(parsed, file.name + ' \u00b7 ' + parsed.rows.length + ' repos');
+    } catch (err) {
+      alert('Could not read that file as CSV.');
+    }
+  };
+  reader.readAsText(file);
+});
+
+loadData({ rows: [], label1: 'instance 1', label2: 'instance 2' }, 'No data loaded');
+</script>
+</body>
+</html>
