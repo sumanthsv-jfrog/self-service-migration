@@ -1,18 +1,20 @@
 # JFrog migration self-service tool
 
 Self-service tool to migrate Artifactory repositories from a source
-instance to a target instance using JFrog Data Transfer
-(`jf rt transfer-files`), implemented as shell scripts run by GitHub
-Actions. Queueing is native GitHub Actions concurrency control; state is
-tracked in JSON files committed back into this repo.
+instance to a target instance, using either JFrog Federation (small
+repos) or Data Transfer (`jf rt transfer-files`, large repos),
+implemented as shell scripts run by GitHub Actions. A per-request
+pipeline logs and prepares each repo; an hourly scheduler picks up
+prepared repos and runs the appropriate migration mechanism. State is
+tracked in a single file committed back into this repo.
 
 ## Status
 
-Design / early implementation. The scripts currently implement a single
-pipeline (connectivity check → repo check/create → transfer). The
-two-pipeline, batched design below is the agreed direction — see
-`docs/design.md` for open decisions (batch thresholds, what triggers
-Pipeline B) and rationale.
+Design / early implementation. The scripts currently implement the
+older single-pipeline version (connectivity check → repo check/create →
+transfer). The Federation + Data Transfer design below is the agreed
+direction — see `docs/design.md` for open decisions (size thresholds,
+federation-cap counting, failure handling) and rationale.
 
 ## High-level flow
 
@@ -22,41 +24,49 @@ Pipeline B) and rationale.
    (not checked or managed by this tool).
 2. User requests a migration; the request is appended to a request log
    file.
-3. Connectivity check: `jf rt ping` against `source-server` and
+3. **Early exit:** if a tracking row already exists for this repo with
+   `migration_status = Completed` OR `Fedmember_added = True`, exit
+   immediately — no connectivity check, no repo lookups. Already done.
+4. Connectivity check: `jf rt ping` against `source-server` and
    `target-server`. If either is unreachable, reject and **alert
    DevOps** (infra issue, not something the requesting user can fix).
-4. If the repo doesn't exist in source at all, reject and notify the
+5. If the repo doesn't exist in source at all, reject and notify the
    user (this one's user-actionable).
-5. Fetch artifact count + size from source, and append a row to a
-   single tracking file: `repo, count, size, config_status=pending,
-   migration_status=pending`.
-6. Config-only transfer: if the repo doesn't exist in target, create it
+6. Fetch artifact size + count from source, and append a row to a
+   single tracking file: `repo, size, count, config_status=False,
+   migration_status=Pending, Fedmember_added=False`.
+7. Config-only transfer: if the repo doesn't exist in target, create it
    from source's config (`GET` source → `PUT` target). No data is moved
    in this step.
-7. Flip `config_status` to `completed` in that same row.
-   `migration_status` stays `pending` — Pipeline A never touches it
-   again.
+8. Flip `config_status` to `True` in that same row. `migration_status`
+   and `Fedmember_added` stay untouched — Pipeline A never sets either
+   of them again.
 
-**Pipeline B — data migration (scheduled poll)**
+**Pipeline B — federation + data transfer scheduler (hourly)**
 
-8. Runs on a cron schedule (not triggered by Pipeline A directly).
-   Filter the tracking file down to rows where `config_status =
-   completed AND migration_status = pending`.
-9. Grouping logic (still being tuned): batch those repos by count/size
-   thresholds into a batch of 1, 3, or 5.
-10. Check whether any row has `migration_status = in_progress`; if so,
-    wait for the next scheduled poll rather than starting a second
-    transfer concurrently.
-11. Set the batch's rows to `migration_status = in_progress` and notify
-    the team the migration has started.
-12. Run `jf rt transfer-files` per repo in the batch.
-13. On exit:
-    - Non-zero → reset `migration_status` back to `pending` so the next
-      poll retries it automatically, and **alert DevOps**.
-    - Zero → run a diagnostic-only file count/size comparison between
-      source and target (logged, never blocks completion), set
-      `migration_status = completed`, and notify the team with the
-      source-vs-target count/size.
+Two migration mechanisms, chosen by repo size: **Federation** (near
+instant, capped at 4 concurrently enabled repos) for repos under 500GB,
+and **Data Transfer** for repos at or above 500GB. A repo moved via Data
+Transfer is added as a federation member once its transfer completes.
+
+9. Runs on an hourly schedule (not triggered by Pipeline A). First
+   check: **is a Data Transfer job currently running?**
+10. **If running:** a pending repo under 500GB still gets federation
+    enabled (respecting the 4-slot cap), then the cycle exits — no new
+    Data Transfer is started while one is already in flight.
+11. **If not running:** first check the status of any previously
+    started transfer; if it completed, add that repo as a federation
+    member (`Fedmember_added = True`, `migration_status = Completed`).
+    Then look at pending repos (`config_status = True, migration_status
+    = Pending`):
+    - Under 500GB → enable federation directly (up to the remaining
+      slots, max 4 total) → `Fedmember_added = True, migration_status =
+      Completed`.
+    - 500GB or more → gather all pending repos in that size class and
+      run `jf rt transfer-files --include-repos` as one batched job —
+      **except** if any repo is 10TB or larger, in which case it runs
+      alone, unbatched. Rows included are set to `migration_status =
+      InProgress`.
 
 ## Repo layout
 
@@ -73,15 +83,17 @@ docs/                           design notes, decisions, open questions
 ```
 
 > **Not yet implemented in the scripts:** the request log file, the
-> merged tracking file (`config_status`/`migration_status` columns and
-> batching), the grouping logic, the scheduled poll trigger, the
-> retry-to-pending behavior on failure, and the start/completion team
+> six-column tracking file (`config_status`, `migration_status`,
+> `Fedmember_added`), the early-exit check, the Federation-enable path,
+> the hourly scheduler and its running/not-running branching, the
+> `--include-repos` batching, and the start/completion team
 > notifications. Currently `repo_manager.sh` and `migrate.sh` run the
-> single-pipeline version (connectivity → repo check/create → transfer,
-> one repo per run). This README documents the two-pipeline design
-> we're building toward — see `docs/design.md` for what's tracked as
-> open (batch thresholds, retry-count cutoff for repeatedly failing
-> repos, poll interval).
+> older single-pipeline version (connectivity → repo check/create →
+> transfer, one repo per run, no Federation). This README documents the
+> design we're building toward — see `docs/design.md` for what's tracked
+> as open (the 500GB/10TB thresholds, whether a Data-Transfer-completed
+> repo counts toward the 4-slot federation cap, and failure/retry
+> handling for the scheduler, which isn't defined yet).
 
 ## Flow diagram
 
@@ -90,33 +102,41 @@ flowchart TD
     subgraph A[" "]
         direction TB
         A0[User requests migration] --> A1[Append to request log file]
-        A1 --> A2{source-server & target-server reachable?}
+        A1 --> AE{"Existing row: migration_status=Completed<br/>OR Fedmember_added=True?"}
+        AE -->|yes| AEx[Exit: already migrated]
+        AE -->|no| A2{source-server & target-server reachable?}
         A2 -->|no| A2f[Reject: alert DevOps — infra issue]
         A2 -->|yes| A3{Repo exists in source?}
         A3 -->|no| A3f[Reject: notify user]
-        A3 -->|yes| A4[Fetch artifact count + size from source]
-        A4 --> A5["Append row to tracking file<br/>repo, count, size, config_status=pending, migration_status=pending"]
+        A3 -->|yes| A4[Fetch artifact size + count from source]
+        A4 --> A5["Append row to tracking file<br/>repo, size, count, config_status=False, migration_status=Pending, Fedmember_added=False"]
         A5 --> A6{Repo exists in target?}
         A6 -->|no| A7[createRepo: GET source config → PUT target]
         A7 --> A8
-        A6 -->|yes| A8["Flip config_status → completed<br/>migration_status stays pending, same row"]
+        A6 -->|yes| A8["config_status → True<br/>migration_status stays Pending, same row"]
     end
 
-    A8 -.pipeline A ends, pipeline B runs on a schedule.-> B0
+    A8 -.pipeline A ends, pipeline B runs hourly, independently.-> B0
 
     subgraph B[" "]
         direction TB
-        B0[Scheduled trigger — cron poll] --> B1["Filter tracking file<br/>config_status=completed AND migration_status=pending"]
-        B1 --> B2["Grouping logic (core decision)<br/>batch by count/size thresholds<br/>→ batch of 1, 3, or 5 repos"]
-        B2 --> B3{Any row with<br/>migration_status = in_progress?}
-        B3 -->|yes| B3w[Wait for next scheduled poll]
-        B3w --> B3
-        B3 -->|no| B4["Set batch rows migration_status=in_progress<br/>notify team: migration started"]
-        B4 --> B5[Run jf rt transfer-files per repo in batch]
-        B5 --> B6{exit status?}
-        B6 -->|non-zero| B6f["migration_status → pending (auto-retry)<br/>alert DevOps"]
-        B6 -->|zero| B7["Diff check (diagnostic only)<br/>compare source vs target count + size"]
-        B7 --> B8["migration_status → completed<br/>notify team: completed, source vs target count/size"]
+        B0[GitHub Action trigger — every 1 hour] --> B1{Data Transfer currently running?}
+
+        B1 -->|yes| B1s{Repo size < 500GB?}
+        B1s -->|yes| B1e["Enable federation<br/>(respecting 4-slot cap), then exit this cycle"]
+        B1s -->|no| B1x[Exit this cycle — wait for next poll]
+
+        B1 -->|no| B2["Check status of any prior transfer<br/>if complete: Fedmember_added=True, migration_status=Completed"]
+        B2 --> B3["Get pending repos<br/>config_status=True, migration_status=Pending"]
+        B3 --> B4{Repo size < 500GB?}
+        B4 -->|yes| B5["Enable federation directly<br/>up to remaining slots (max 4 total)"]
+        B5 --> B6["Fedmember_added=True, migration_status=Completed"]
+        B4 -->|no, ≥500GB| B7[Gather all pending repos ≥ 500GB]
+        B7 --> B8{Any repo ≥ 10TB?}
+        B8 -->|no| B9["Run transfer-files --include-repos (batched)"]
+        B8 -->|yes| B10["Run transfer-files for that repo alone (no batching)"]
+        B9 --> B11[migration_status=InProgress for included repos]
+        B10 --> B11
     end
 ```
 
@@ -138,26 +158,29 @@ flowchart TD
    on the migration VM (self-hosted runner).
 2. Trigger Pipeline A (currently `workflow_dispatch`, issue-based
    trigger planned) with the repo name.
-3. Pipeline B picks it up on its next scheduled poll once
-   `config_status` is `completed` — see docs/design.md for the poll
-   interval and grouping thresholds, still open.
+3. Pipeline B's hourly run picks it up automatically once `config_status
+   = True` — small repos get Federation enabled directly; large repos
+   go through Data Transfer and get added to Federation once that
+   completes.
 
 ## Known limitations (see docs/design.md for detail)
 
 - Plugin installation on the source VM is manual and not verified by
   this tool.
-- Completion is determined by `jf rt transfer-files` exit status;
-  file count/size differences are logged but do not block completion.
-- Grouping/batch-size thresholds (1, 3, or 5 repos per batch) aren't
-  decided yet.
-- Pipeline B's poll interval (cron schedule) isn't decided yet.
-- On failure, `migration_status` resets to `pending` for automatic
-  retry on the next poll. There's no retry-count cutoff yet, so a
-  persistently failing repo (bad permissions, corrupted data, etc.)
-  will retry forever, once per poll cycle, alerting DevOps each time
-  rather than eventually going terminal.
+- The 500GB (Federation vs. Data Transfer) and 10TB (batched vs. solo
+  transfer) thresholds are placeholders — not validated against real
+  transfer times or Federation's actual limits.
+- Whether a repo added to Federation *after* a Data Transfer job counts
+  toward the 4-slot Federation cap isn't decided — if it does, the "get
+  pending repos" step needs to recount before deciding how many slots
+  are actually free.
+- Failure handling for `jf rt transfer-files` in the scheduler isn't
+  defined yet — no retry, no alerting path, no terminal `failed` state.
+  A repo whose transfer fails will just sit at `migration_status =
+  InProgress` forever with nothing to notice or fix it.
 - Team notifications (start/completion) aren't wired to any channel
   yet — needs a Slack webhook, email, or similar picked.
-- The progress-parsing regex in `migrate.sh` assumes a particular
-  `jf rt transfer-files` output shape — verify it against your installed
-  CLI version and adjust if the JSON progress line format differs.
+- The progress-parsing approach for a running transfer (if any) isn't
+  defined for this scheduler design — the older `migrate.sh` used a
+  regex against `jf rt transfer-files` stdout, which may not carry over
+  cleanly to batched `--include-repos` runs.
