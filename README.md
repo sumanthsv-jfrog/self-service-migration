@@ -87,7 +87,7 @@ Transfer is added as a federation member once its transfer completes.
 ```
 .github/workflows/migrate.yml   workflow_dispatch trigger, orchestrates the steps below
 .github/workflows/lint.yml      shellcheck on every script change
-scripts/repo_manager.sh         connectivity check, repo existence checks, config-only repo creation
+scripts/pre-migration.sh        Pipeline A: download tracking file, connectivity + repo existence checks, config-only repo creation, upload tracking file (was track-repo.sh / repo_manager.sh)
 scripts/migrate.sh              preMigration wait check, runs transfer-files, polls progress, logs diff_notes
 scripts/state.sh                init/update/read state/<job_id>.json, commits + pushes
 scripts/lib/common.sh           logging, env config loader, shared by all scripts
@@ -103,7 +103,7 @@ docs/                           design notes, decisions, open questions
 > early-exit check, the Federation-enable path, the hourly scheduler and
 > its running/not-running branching, the `requested_time` sort, the
 > `--include-repos` batching, and the start/completion team
-> notifications. Currently `repo_manager.sh` and `migrate.sh` run the
+> notifications. Currently `pre-migration.sh` and `migrate.sh` run the
 > older single-pipeline version (connectivity → repo check/create →
 > transfer, one repo per run, no Federation). This README documents the
 > design we're building toward — see `docs/design.md` for what's tracked
@@ -160,6 +160,64 @@ flowchart TD
         B10 --> B11
     end
 ```
+
+## Script-level flow: pre-migration.sh
+
+The diagram above shows the business-logic decisions; this one shows
+the actual steps `pre-migration.sh` (the script `track-repo.sh` is
+being renamed to) runs on the self-hosted runner for Pipeline A, and
+how it hands off into the same hourly Pipeline B shown above.
+
+```mermaid
+flowchart TD
+    subgraph PreMigration["Pipeline A — pre-migration.sh (triggered by a GitHub issue)"]
+        direction TB
+        I0[User opens a GitHub issue requesting migration] --> I1[Issue trigger fires the Pipeline A workflow]
+        I1 --> ISC[Triggers script: pre-migration.sh]
+        ISC --> P1[downloadTrackingFile]
+        P1 --> P2{"isAlreadyMigrated?<br/>migration_status=Completed OR Fedmember_added=True"}
+        P2 -->|yes| P2x[Exit: already migrated]
+        P2 -->|no| P3[fetchRepoDetails: size + count from source]
+        P3 --> P4["Append row to tracking file<br/>repo, size, count, config_status=False, migration_status=Pending, Fedmember_added=False, requested_time"]
+        P4 --> P5{Repo exists in target?}
+        P5 -->|yes| P6[config_status → True]
+        P5 -->|no| P7[Create repo in target: GET source config → PUT target]
+        P7 --> P6
+        P6 --> P8[uploadTrackingFile: commit + push the updated file]
+    end
+
+    P8 -.pipeline A ends, pipeline B runs hourly, independently.-> B0S
+
+    subgraph PeriodicPipeline["Pipeline B — scheduler (hourly)"]
+        direction TB
+        B0S[GitHub Action trigger — every 1 hour] --> B1S{Data Transfer currently running?}
+
+        B1S -->|yes| B1Ss{Repo size < 500GB?}
+        B1Ss -->|yes| B1Se["Enable federation<br/>(respecting 4-slot cap), then exit this cycle"]
+        B1Ss -->|no| B1Sx[Exit this cycle — wait for next poll]
+
+        B1S -->|no| B2S["Check status of any prior transfer<br/>if complete: Fedmember_added=True, migration_status=Completed"]
+        B2S --> B3S["Get pending repos<br/>config_status=True, migration_status=Pending"]
+        B3S --> BXS{"Repo now in<br/>config/excluded-repos.txt?"}
+        BXS -->|yes| BXSs[migration_status=Excluded — skip]
+        BXS -->|no| B3Ss[Sort remaining by requested_time ascending]
+        B3Ss --> B4S{Repo size < 500GB?}
+        B4S -->|yes| B5S["Enable federation directly, oldest-requested first<br/>up to remaining slots (max 4 total)"]
+        B5S --> B6S["Fedmember_added=True, migration_status=Completed"]
+        B4S -->|no, ≥500GB| B7S[Gather all pending repos ≥ 500GB, oldest-requested first]
+        B7S --> B8S{Any repo ≥ 10TB?}
+        B8S -->|no| B9S["Run transfer-files --include-repos (batched)"]
+        B8S -->|yes| B10S["Run transfer-files for that repo alone (no batching)"]
+        B9S --> B11S[migration_status=InProgress for included repos]
+        B10S --> B11S
+    end
+```
+
+> **Note:** this view intentionally starts from `downloadTrackingFile`
+> and doesn't repeat the connectivity check, the "repo missing in
+> source" rejection, or the exclusion-list check already shown in the
+> [flow diagram](#flow-diagram) above — those still apply, this is just
+> a closer look at the tracking-file mechanics of the same pipeline.
 
 ## Requirements
 

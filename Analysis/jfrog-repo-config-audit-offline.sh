@@ -86,14 +86,24 @@ read -r -d '' ANALYZE <<'JQ' || true
       ; reduce $e.value[] as $m
           ( .
           ; .[$m] = ((.[$m] // []) + [$e.key]) ) ) ) as $parent_of
-| {
+# ---- naming convention checks (add more rules to this list over time) ----
+| def maxKeyLength($t):
+    if $t == "REMOTE" then 58 else 64 end;
+def namingIssues($k; $t):
+    [ if ($k | contains("_")) then "underscore" else empty end,
+      if ($k | contains(".")) then "dot" else empty end,
+      if ($k | length) > maxKeyLength($t) then "too_long" else empty end
+      # e.g. add: , if ($k | test("[A-Z]")) then "uppercase" else empty end
+    ];
+{
     summary: {
       local:     ($repos | map(select(.type=="LOCAL"))     | length),
       remote:    ($repos | map(select(.type=="REMOTE"))    | length),
       federated: ($repos | map(select(.type=="FEDERATED")) | length),
       virtual:   ($vkeys | length),
       nested_virtuals: ($nested | length),
-      cycles:    ($cycles | length)
+      cycles:    ($cycles | length),
+      naming_issues: ( [ $repos[] | select((namingIssues(.key; .type) | length) > 0) ] | length )
     },
     repos: ( $repos
              | map( .key as $rk
@@ -105,7 +115,9 @@ read -r -d '' ANALYZE <<'JQ' || true
                         nested_virtual: (($g[$rk] // []) | length > 0),
                         in_cycle: (($cycle_nodes | index($rk)) != null),
                         part_of_virtuals: ($parent_of[$rk] // []),
-                        part_of_virtual_count: (($parent_of[$rk] // []) | length) } ) ),
+                        part_of_virtual_count: (($parent_of[$rk] // []) | length),
+                        naming_issues: namingIssues($rk; .type),
+                        has_naming_issue: ((namingIssues($rk; .type) | length) > 0) } ) ),
     nested_virtuals: $nested,
     cycles: $cycles
   }
@@ -117,10 +129,11 @@ jq -n --slurpfile repos "$WORKDIR/repos.json" --slurpfile virtuals "$WORKDIR/vir
 
 # ---------- write CSV ----------
 jq -r '
-  (["key","type","package_type","member_count","nested_virtual","in_cycle","virtual_member_count","virtual_members","part_of_virtual_count","part_of_virtuals","members"]),
+  (["key","type","package_type","member_count","nested_virtual","in_cycle","virtual_member_count","virtual_members","part_of_virtual_count","part_of_virtuals","has_naming_issue","naming_issues","members"]),
   (.repos[] | [ .key, .type, .packageType, .member_count, .nested_virtual, .in_cycle,
                 .virtual_member_count, (.virtual_members | join(";")),
                 .part_of_virtual_count, (.part_of_virtuals | join(";")),
+                .has_naming_issue, (.naming_issues | join(";")),
                 (.members | join(";")) ])
   | @csv' "$ANALYSIS_FILE" > "$OUTPUT"
 
@@ -133,7 +146,8 @@ jq -r '.summary
     " Federated repos  : \(.federated)",
     " Virtual repos    : \(.virtual)",
     "   of which nested: \(.nested_virtuals)",
-    " Circular refs    : \(.cycles)"' "$ANALYSIS_FILE" >&2
+    " Circular refs    : \(.cycles)",
+    " Naming issues    : \(.naming_issues)"' "$ANALYSIS_FILE" >&2
 
 NESTED="$(jq -r '.nested_virtuals[]?' "$ANALYSIS_FILE")"
 if [[ -n "$NESTED" ]]; then
@@ -145,6 +159,17 @@ CYCLES="$(jq -r '.cycles[] | (. + [.[0]]) | join(" -> ")' "$ANALYSIS_FILE")"
 if [[ -n "$CYCLES" ]]; then
   echo >&2; echo "!! CIRCULAR references detected (circle back):" >&2
   printf '%s\n' "$CYCLES" | sed 's/^/   /' >&2
+fi
+
+NAMING_COUNT=$(jq '.summary.naming_issues' "$ANALYSIS_FILE")
+if [[ "$NAMING_COUNT" -gt 0 ]]; then
+  echo >&2; echo "Naming convention issues (avoid underscores; use hyphens):" >&2
+  if [[ "$NAMING_COUNT" -gt 50 ]]; then
+    jq -r '.repos[] | select(.has_naming_issue) | "\(.key) [\(.type)]"' "$ANALYSIS_FILE" | sort | head -50 | sed 's/^/   - /' >&2
+    echo "   ... and $((NAMING_COUNT - 50)) more (see ${OUTPUT})" >&2
+  else
+    jq -r '.repos[] | select(.has_naming_issue) | "\(.key) [\(.type)]"' "$ANALYSIS_FILE" | sort | sed 's/^/   - /' >&2
+  fi
 fi
 
 echo >&2; echo "CSV written to ${OUTPUT}" >&2
