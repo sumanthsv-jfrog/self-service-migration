@@ -21,7 +21,9 @@ federation-cap counting, failure handling) and rationale.
 **Pipeline A — pre-migration (runs per request)**
 
 1. **One-time, manual:** Data Transfer plugin installed on the source VM
-   (not checked or managed by this tool).
+   (not checked or managed by this tool — see
+   [One-time setup: source instance](#one-time-setup-source-instance)
+   below).
 2. User requests a migration; the request is appended to a request log
    file.
 3. **Early exit:** if a tracking row already exists for this repo with
@@ -151,11 +153,146 @@ flowchart TD
 - `jf` CLI, `jq` on the runner (already required for the manual `jf c
   add` step above)
 
+## One-time setup: source instance
+
+Before any migration can run, the source Artifactory instance needs a
+dedicated migration user, the JFrog CLI configured against it, and the
+Data Transfer plugin installed. **This is a manual, one-time step per
+source instance — it is not checked, run, or verified by this tool.**
+
+### 1. Create a migration user
+
+Create a user named `migrationuser` on **both** the source and target
+JPD, then generate an access token for that user on each instance —
+the CLI configuration in the next two steps authenticates with these
+tokens rather than a username/password login.
+
+### 2. Configure the JFrog CLI on the source instance
+
+Run these commands directly on the source Artifactory host (this
+assumes a containerized deployment with direct access to
+`localhost:8082`):
+
+```bash
+cd /opt/jfrog/artifactory/var
+mkdir tmp
+cd tmp
+
+# Download the CLI into this folder — safe to use here since it's inside the container
+curl -fkL https://getcli.jfrog.io/v2-jf | sh
+
+# Make it executable
+chmod +x jf
+
+# Set the CLI's home directory
+export JFROG_CLI_HOME_DIR=/opt/jfrog/artifactory/var/tmp/.jfrog
+
+# Configure the CLI against the local Artifactory instance
+./jf c add source-server
+```
+
+When prompted, use:
+
+| Prompt | Value |
+|---|---|
+| JFrog Platform URL | `http://localhost:8082` |
+| Access token | *(access token generated for `migrationuser`)* |
+| Reverse proxy client certificate? | `n` |
+
+Verify the connection:
+
+```bash
+./jf rt ping --server-id source-server
+```
+
+### 3. Configure the JFrog CLI against the target instance
+
+Still on the same host, add the target server too:
+
+```bash
+./jf c add target-server
+```
+
+When prompted, use:
+
+| Prompt | Value |
+|---|---|
+| JFrog Platform URL | `https://<saas_url>` *(your target instance URL)* |
+| Access token | *(access token generated for `migrationuser` on the target)* |
+| Reverse proxy client certificate? | `n` |
+
+### 4. Install the Data Transfer plugin
+
+**If the source host has internet access**, install it directly:
+
+```bash
+./jf rt transfer-plugin-install source-server --home-dir /opt/jfrog
+```
+
+**If it doesn't**, download the plugin files yourself and install from
+the local copies instead:
+
+```bash
+# [RELEASE] should resolve to the latest version listed at:
+# https://releases.jfrog.io/artifactory/jfrog-releases/data-transfer
+#
+# -g disables curl's URL-globbing, since the URL contains literal [ ]
+# characters that curl would otherwise try to interpret as a range.
+
+curl -k -O -g https://releases.jfrog.io/artifactory/jfrog-releases/data-transfer/\[RELEASE\]/lib/data-transfer.jar
+curl -k -O -g https://releases.jfrog.io/artifactory/jfrog-releases/data-transfer/\[RELEASE\]/dataTransfer.groovy
+
+./jf rt transfer-plugin-install source-server --dir /opt/jfrog/artifactory/var/tmp --home-dir /opt/jfrog
+```
+
+Once both `source-server` and `target-server` are configured, this VM
+satisfies the runner prerequisite in [Requirements](#requirements)
+above.
+
+## Manual data transfer (reference)
+
+The scripts in this repo are what Pipeline A and B are meant to
+automate end to end. Until Pipeline B is fully built — or for a one-off
+migration run outside the tool — the same underlying `jf` commands can
+be run by hand from the migration VM.
+
+### Run a transfer in the foreground
+
+```bash
+jf rt transfer-files source-server target-server --include-repos "reponame"
+```
+
+### Run a transfer in the background
+
+```bash
+nohup jf rt transfer-files source-server target-server --include-repos "cbafed-new" > ~/transfer.log 2>&1 &
+echo "Transfer started with PID: $!"
+```
+
+### Check transfer progress
+
+```bash
+jf rt transfer-files --status
+```
+
+### Stop a transfer
+
+```bash
+jf rt transfer-files --stop
+```
+
+### Control transfer speed
+
+```bash
+jf rt transfer-settings
+```
+
 ## Running a migration
 
-1. One-time, manual: install the Data Transfer plugin on the source VM,
-   and run `jf c add source-server ...` / `jf c add target-server ...`
-   on the migration VM (self-hosted runner).
+1. Complete the [one-time setup](#one-time-setup-source-instance) above
+   once per source instance: install the Data Transfer plugin, and run
+   `jf c add source-server ...` / `jf c add target-server ...` on the
+   migration VM (self-hosted runner).
 2. Trigger Pipeline A (currently `workflow_dispatch`, issue-based
    trigger planned) with the repo name.
 3. Pipeline B's hourly run picks it up automatically once `config_status
@@ -166,7 +303,7 @@ flowchart TD
 ## Known limitations (see docs/design.md for detail)
 
 - Plugin installation on the source VM is manual and not verified by
-  this tool.
+  this tool (see [One-time setup](#one-time-setup-source-instance)).
 - The 500GB (Federation vs. Data Transfer) and 10TB (batched vs. solo
   transfer) thresholds are placeholders — not validated against real
   transfer times or Federation's actual limits.
