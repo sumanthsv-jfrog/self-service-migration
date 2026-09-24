@@ -26,21 +26,28 @@ federation-cap counting, failure handling) and rationale.
    below).
 2. User requests a migration; the request is appended to a request log
    file.
-3. **Early exit:** if a tracking row already exists for this repo with
+3. **Exclusion check:** if the repo name appears in
+   `config/excluded-repos.txt`, reject immediately and notify the user
+   — no tracking row is created. See
+   [Excluding repos from migration](#excluding-repos-from-migration)
+   below.
+4. **Early exit:** if a tracking row already exists for this repo with
    `migration_status = Completed` OR `Fedmember_added = True`, exit
    immediately — no connectivity check, no repo lookups. Already done.
-4. Connectivity check: `jf rt ping` against `source-server` and
+5. Connectivity check: `jf rt ping` against `source-server` and
    `target-server`. If either is unreachable, reject and **alert
    DevOps** (infra issue, not something the requesting user can fix).
-5. If the repo doesn't exist in source at all, reject and notify the
+6. If the repo doesn't exist in source at all, reject and notify the
    user (this one's user-actionable).
-6. Fetch artifact size + count from source, and append a row to a
+7. Fetch artifact size + count from source, and append a row to a
    single tracking file: `repo, size, count, config_status=False,
-   migration_status=Pending, Fedmember_added=False`.
-7. Config-only transfer: if the repo doesn't exist in target, create it
+   migration_status=Pending, Fedmember_added=False, requested_time`.
+   `requested_time` is set once here and never changed — it's what
+   Pipeline B uses to order pending repos.
+8. Config-only transfer: if the repo doesn't exist in target, create it
    from source's config (`GET` source → `PUT` target). No data is moved
    in this step.
-8. Flip `config_status` to `True` in that same row. `migration_status`
+9. Flip `config_status` to `True` in that same row. `migration_status`
    and `Fedmember_added` stay untouched — Pipeline A never sets either
    of them again.
 
@@ -51,24 +58,29 @@ instant, capped at 4 concurrently enabled repos) for repos under 500GB,
 and **Data Transfer** for repos at or above 500GB. A repo moved via Data
 Transfer is added as a federation member once its transfer completes.
 
-9. Runs on an hourly schedule (not triggered by Pipeline A). First
-   check: **is a Data Transfer job currently running?**
-10. **If running:** a pending repo under 500GB still gets federation
+10. Runs on an hourly schedule (not triggered by Pipeline A). First
+    check: **is a Data Transfer job currently running?**
+11. **If running:** a pending repo under 500GB still gets federation
     enabled (respecting the 4-slot cap), then the cycle exits — no new
     Data Transfer is started while one is already in flight.
-11. **If not running:** first check the status of any previously
+12. **If not running:** first check the status of any previously
     started transfer; if it completed, add that repo as a federation
     member (`Fedmember_added = True`, `migration_status = Completed`).
-    Then look at pending repos (`config_status = True, migration_status
-    = Pending`):
-    - Under 500GB → enable federation directly (up to the remaining
-      slots, max 4 total) → `Fedmember_added = True, migration_status =
-      Completed`.
-    - 500GB or more → gather all pending repos in that size class and
-      run `jf rt transfer-files --include-repos` as one batched job —
-      **except** if any repo is 10TB or larger, in which case it runs
-      alone, unbatched. Rows included are set to `migration_status =
-      InProgress`.
+    Then get pending repos (`config_status = True, migration_status =
+    Pending`), **re-check each against `config/excluded-repos.txt`**
+    (a repo can be added to the exclusion list after it was already
+    queued — this catches that), skip and mark any match
+    `migration_status = Excluded`, then sort what's left by
+    `requested_time` ascending — oldest request first within each size
+    bucket below:
+    - Under 500GB → enable federation directly, oldest-requested first,
+      up to the remaining slots (max 4 total) → `Fedmember_added =
+      True, migration_status = Completed`.
+    - 500GB or more → gather all pending repos in that size class,
+      oldest-requested first, and run `jf rt transfer-files
+      --include-repos` as one batched job — **except** if any repo is
+      10TB or larger, in which case it runs alone, unbatched. Rows
+      included are set to `migration_status = InProgress`.
 
 ## Repo layout
 
@@ -80,14 +92,16 @@ scripts/migrate.sh              preMigration wait check, runs transfer-files, po
 scripts/state.sh                init/update/read state/<job_id>.json, commits + pushes
 scripts/lib/common.sh           logging, env config loader, shared by all scripts
 config/environments.yaml        source/target server ids, URLs, thresholds (no secrets)
+config/excluded-repos.txt       repo keys to skip on request, one per line, # for comments
 state/                          committed per-job state files
 docs/                           design notes, decisions, open questions
 ```
 
 > **Not yet implemented in the scripts:** the request log file, the
-> six-column tracking file (`config_status`, `migration_status`,
-> `Fedmember_added`), the early-exit check, the Federation-enable path,
-> the hourly scheduler and its running/not-running branching, the
+> seven-column tracking file (`config_status`, `migration_status`,
+> `Fedmember_added`, `requested_time`), the exclusion-list check, the
+> early-exit check, the Federation-enable path, the hourly scheduler and
+> its running/not-running branching, the `requested_time` sort, the
 > `--include-repos` batching, and the start/completion team
 > notifications. Currently `repo_manager.sh` and `migrate.sh` run the
 > older single-pipeline version (connectivity → repo check/create →
@@ -104,14 +118,16 @@ flowchart TD
     subgraph A[" "]
         direction TB
         A0[User requests migration] --> A1[Append to request log file]
-        A1 --> AE{"Existing row: migration_status=Completed<br/>OR Fedmember_added=True?"}
+        A1 --> AX{Repo in config/excluded-repos.txt?}
+        AX -->|yes| AXf[Reject: notify user — repo is excluded]
+        AX -->|no| AE{"Existing row: migration_status=Completed<br/>OR Fedmember_added=True?"}
         AE -->|yes| AEx[Exit: already migrated]
         AE -->|no| A2{source-server & target-server reachable?}
         A2 -->|no| A2f[Reject: alert DevOps — infra issue]
         A2 -->|yes| A3{Repo exists in source?}
         A3 -->|no| A3f[Reject: notify user]
         A3 -->|yes| A4[Fetch artifact size + count from source]
-        A4 --> A5["Append row to tracking file<br/>repo, size, count, config_status=False, migration_status=Pending, Fedmember_added=False"]
+        A4 --> A5["Append row to tracking file<br/>repo, size, count, config_status=False, migration_status=Pending, Fedmember_added=False, requested_time"]
         A5 --> A6{Repo exists in target?}
         A6 -->|no| A7[createRepo: GET source config → PUT target]
         A7 --> A8
@@ -130,10 +146,13 @@ flowchart TD
 
         B1 -->|no| B2["Check status of any prior transfer<br/>if complete: Fedmember_added=True, migration_status=Completed"]
         B2 --> B3["Get pending repos<br/>config_status=True, migration_status=Pending"]
-        B3 --> B4{Repo size < 500GB?}
-        B4 -->|yes| B5["Enable federation directly<br/>up to remaining slots (max 4 total)"]
+        B3 --> BX{"Repo now in<br/>config/excluded-repos.txt?"}
+        BX -->|yes| BXs[migration_status=Excluded — skip]
+        BX -->|no| B3s[Sort remaining by requested_time ascending]
+        B3s --> B4{Repo size < 500GB?}
+        B4 -->|yes| B5["Enable federation directly, oldest-requested first<br/>up to remaining slots (max 4 total)"]
         B5 --> B6["Fedmember_added=True, migration_status=Completed"]
-        B4 -->|no, ≥500GB| B7[Gather all pending repos ≥ 500GB]
+        B4 -->|no, ≥500GB| B7[Gather all pending repos ≥ 500GB, oldest-requested first]
         B7 --> B8{Any repo ≥ 10TB?}
         B8 -->|no| B9["Run transfer-files --include-repos (batched)"]
         B8 -->|yes| B10["Run transfer-files for that repo alone (no batching)"]
@@ -152,6 +171,30 @@ flowchart TD
   to commit the tracking file / request log back)
 - `jf` CLI, `jq` on the runner (already required for the manual `jf c
   add` step above)
+
+## Excluding repos from migration
+
+`config/excluded-repos.txt` lists repo keys that should never be
+migrated — one exact repo key per line, blank lines and lines starting
+with `#` are ignored (same idea as `.gitignore`, but exact-name
+matching only; no glob patterns yet).
+
+```
+# staging repos we don't want moved
+staging-npm-local
+staging-docker-local
+```
+
+This is checked in two places:
+
+- **Pipeline A**, before a tracking row is even created — a request
+  for an excluded repo is rejected immediately and the user is
+  notified. Nothing is written to the tracking file.
+- **Pipeline B**, on every hourly run, against repos still `Pending` —
+  this catches a repo that was queued *before* it was added to the
+  exclusion list. A match is set to `migration_status = Excluded` and
+  skipped, rather than left stuck at `Pending` forever with no way to
+  tell it apart from one that's simply waiting its turn.
 
 ## One-time setup: source instance
 
@@ -304,6 +347,9 @@ jf rt transfer-settings
 
 - Plugin installation on the source VM is manual and not verified by
   this tool (see [One-time setup](#one-time-setup-source-instance)).
+- `config/excluded-repos.txt` matches exact repo names only — no glob
+  or pattern support yet, and no validation that an excluded name
+  actually corresponds to a real repo.
 - The 500GB (Federation vs. Data Transfer) and 10TB (batched vs. solo
   transfer) thresholds are placeholders — not validated against real
   transfer times or Federation's actual limits.
