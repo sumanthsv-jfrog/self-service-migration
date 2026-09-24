@@ -1,40 +1,36 @@
 #!/usr/bin/env bash
-# Fetches artifact size + count for a repo from source and adds its row
-# to the shared tracking file, OR updates specific fields on an
-# existing row. Tracking file lives as a plain file in a JFrog generic
-# repo (see TRACKING_* in scripts/lib/common.sh).
+# Pipeline A, end to end for one repo: download the tracking file,
+# exit early if already migrated, check connectivity + source
+# existence, fetch size/count, append a row, create the repo in target
+# if needed, flip config_status, upload once at the end.
+#
+# Renamed from track_repo.sh, with repo_manager.sh's connectivity/repo
+# check/create logic folded in — this is now the single script Pipeline
+# A runs, rather than two.
 #
 # Usage:
-#   track_repo.sh <repo-name> --server <server-id> --source-server <server-id>
-#       fetch size/count from source, append a new row as
-#       "<repo>,<size_gb>,<count>,pending,pending,false"
+#   pre-migration.sh <repo-name> --server <tracking-server-id> \
+#       --source-server <server-id> --target-server <server-id>
 #
-#   track_repo.sh <repo-name> --server <server-id> --update field=value [field=value ...]
-#       patch specific fields on an existing row (source not touched,
-#       so --source-server isn't needed here). Recognized field names:
-#       config (or config_status), migration (or migration_status),
-#       fedmember (or fedmember_added).
-#       e.g. track_repo.sh libs-release --server target-server --update config=completed
-#            track_repo.sh libs-release --server target-server --update migration=inprogress
-#            track_repo.sh libs-release --server target-server --update migration=completed fedmember=true
+#   pre-migration.sh <repo-name> --server <tracking-server-id> \
+#       --update field=value [field=value ...]
+#       patch specific fields on an existing row without touching
+#       source/target at all. Recognized field names: config (or
+#       config_status), migration (or migration_status), fedmember (or
+#       fedmember_added).
 #
-# --server names the server-id (as already configured via `jf c add`)
-# that hosts the tracking repo. Required — there is no default.
-# --source-server names the server-id to fetch repo size/count from.
-# Required in fetch mode only.
+# --server is always required (hosts the tracking repo).
+# --source-server / --target-server are required in fetch mode only.
 #
-# Exit codes (the workflow branches on these):
-#   0 - proceeded normally (row appended, or fields updated)
+# Exit codes:
+#   0 - proceeded normally (row appended/resumed, or fields updated)
 #   2 - fetch mode only: repo already migrated (migration_status=completed
 #       or fedmember_added=true) — Pipeline A should stop here
 #   1 - error
 #
 # CONCURRENCY WARNING: every mode here does download -> modify -> upload,
-# which is a read-modify-write race if two calls (for the same or
-# different repos) execute close together — the second upload can
-# silently overwrite the first one's change. Put a `concurrency:` group
-# on whichever workflow step(s) call this script so tracking-file
-# updates serialize. This script does not attempt to solve that itself.
+# a read-modify-write race if two calls execute close together. Put a
+# `concurrency:` group on whichever workflow step(s) call this script.
 
 set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -44,48 +40,60 @@ source "${REPO_ROOT}/scripts/lib/common.sh"
 require_cmd jf
 require_cmd jq
 
-REPO_NAME="${1:?usage: track_repo.sh <repo-name> --server <server-id> [--update field=value ...]}"
-TRACKING_REPO="cba-self-service"
-TRACKING_FILE_PATH="repo-tracking.csv"
+REPO_NAME="${1:?usage: pre-migration.sh <repo-name> --server <server-id> [...]}"
 shift
 
 TRACKING_SERVER_ID=""
 SOURCE_SERVER_ID=""
+TARGET_SERVER_ID=""
 UPDATE_MODE=false
 UPDATE_ARGS=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --tracking-server)
-      TRACKING_SERVER_ID="${2:?--server requires a value}"
-      shift 2
-      ;;
-    --source-server)
-      SOURCE_SERVER_ID="${2:?--source-server requires a value}"
-      shift 2
-      ;;
+    --server)         TRACKING_SERVER_ID="${2:?--server requires a value}"; shift 2 ;;
+    --source-server)  SOURCE_SERVER_ID="${2:?--source-server requires a value}"; shift 2 ;;
+    --target-server)  TARGET_SERVER_ID="${2:?--target-server requires a value}"; shift 2 ;;
     --update)
       shift
       UPDATE_MODE=true
       UPDATE_ARGS=("$@")
       break
       ;;
-    *)
-      die "unknown argument '$1'"
-      ;;
+    *) die "unknown argument '$1'" ;;
   esac
 done
 
 [[ -n "$TRACKING_SERVER_ID" ]] || die "--server <server-id> is required"
 
 LOCAL_TRACKING_FILE="repo_status.csv"
+REPO_CONFIG_FILE="/tmp/${REPO_NAME}.json"
+
+# --- tracking file I/O -------------------------------------------------
 
 downloadTrackingFile() {
-  if jf rt download "${TRACKING_REPO}/${TRACKING_FILE_PATH}" "$LOCAL_TRACKING_FILE" \
-       --server-id="$TRACKING_SERVER_ID" --flat=true >/dev/null 2>&1; then
+  # Check tracking-server connectivity BEFORE attempting download. This
+  # matters beyond just failing fast: without this check, a download
+  # failure caused by the tracking server being unreachable looks
+  # identical to "file doesn't exist yet" — which would silently start
+  # a fresh header-only file, and the later upload would then WIPE OUT
+  # every previously tracked repo. Distinguishing "genuinely missing"
+  # from "can't reach it" here prevents that.
+  jf rt ping --server-id="$TRACKING_SERVER_ID" >/dev/null \
+    || die "cannot reach tracking server '${TRACKING_SERVER_ID}' — aborting rather than risk starting a fresh tracking file and overwriting existing data on upload"
+
+  jf rt download "${TRACKING_REPO}/${TRACKING_FILE_PATH}" "$LOCAL_TRACKING_FILE" \
+    --server-id="$TRACKING_SERVER_ID" --flat=true >/dev/null 2>&1 || true
+
+  # Check the file actually landed, rather than trusting jf's exit code
+  # alone — first-time case (nothing uploaded yet) is the common reason
+  # it won't be there, but this also catches jf reporting success
+  # without actually writing the file. Connectivity is already
+  # confirmed above, so a missing file here means genuinely no file yet.
+  if [[ -f "$LOCAL_TRACKING_FILE" ]]; then
     log "downloaded existing tracking file"
   else
-    log "no tracking file found yet — starting a new one"
+    log "no tracking file found on disk after download — starting a new one"
     echo "$TRACKING_CSV_HEADER" > "$LOCAL_TRACKING_FILE"
   fi
 }
@@ -99,16 +107,12 @@ uploadTrackingFile() {
 
 # Prints the existing row for REPO_NAME, or nothing if the file doesn't
 # exist yet (first-time case) or the repo has no row. Guarded
-# explicitly rather than assuming downloadTrackingFile always ran first
-# — awk on a missing file exits non-zero, which under `set -e` would
-# otherwise kill the script silently instead of just returning "no row".
+# explicitly rather than assuming downloadTrackingFile always ran first.
 existingRow() {
   [[ -f "$LOCAL_TRACKING_FILE" ]] || return 0
   awk -F',' -v repo="$REPO_NAME" 'NR>1 && $1==repo' "$LOCAL_TRACKING_FILE"
 }
 
-# True (exit 0) if the existing row already means "done": completed
-# migration, or already a federation member.
 isAlreadyMigrated() {
   local row="$1"
   [[ -z "$row" ]] && return 1
@@ -118,14 +122,20 @@ isAlreadyMigrated() {
   [[ "$migration_status" == "completed" || "$fedmember_added" == "true" ]]
 }
 
-# Fetches size (converted to GB) and file count for REPO_NAME from
-# source via the storageinfo API, which — unlike repo-get — actually
-# reports usage.
-fetchRepoDetails() {
-  [[ -n "$SOURCE_SERVER_ID" ]] || die "--source-server <server-id> is required for fetch mode"
+configStatusOf() {
+  echo "$1" | awk -F',' '{print $4}'
+}
 
+# --- source data ---------------------------------------------------------
+
+# Fetches size (GB), file count, and human-readable size for REPO_NAME
+# from source via the storageinfo API, which — unlike repo-get —
+# actually reports usage. usedSpaceInBytes is the raw figure; usedSpace
+# is a human string (e.g. "1.23 MB") kept as-is for the actual_size
+# column since 2-decimal GB rounds small/medium repos to 0.00.
+fetchRepoDetails() {
   local storageinfo
-  storageinfo=$(jf rt curl -XGET api/storageinfo --server-id="$SOURCE_SERVER_ID") \
+  storageinfo=$(jf rt curl -s -XGET api/storageinfo --server-id="$SOURCE_SERVER_ID") \
     || die "failed to fetch storageinfo from source"
 
   local entry
@@ -134,24 +144,79 @@ fetchRepoDetails() {
 
   [[ -n "$entry" ]] || die "repo '${REPO_NAME}' not found in source storageinfo"
 
-  # NOTE: verify against your Artifactory version — storageinfo has
-  # reported usedSpace as a human string ("1.2 GB") on some versions
-  # and as raw bytes on others. This assumes raw bytes and converts to
-  # GB below; if your instance returns a human string instead, parse
-  # that directly rather than dividing it as a number.
   local used_space_bytes
-  used_space_bytes=$(echo "$entry" | jq -r '.usedSpace // "0"')
+  used_space_bytes=$(echo "$entry" | jq -r '.usedSpaceInBytes // 0')
   REPO_SIZE_GB=$(awk -v b="$used_space_bytes" 'BEGIN { printf "%.2f", b / 1024 / 1024 / 1024 }')
   REPO_FILE_COUNT=$(echo "$entry" | jq -r '.filesCount // 0')
+  REPO_ACTUAL_SIZE=$(echo "$entry" | jq -r '.usedSpace // "N/A"')
 }
 
 appendRow() {
-  echo "${REPO_NAME},${REPO_SIZE_GB},${REPO_FILE_COUNT},pending,pending,false" >> "$LOCAL_TRACKING_FILE"
-  log "appended row for '${REPO_NAME}' (size=${REPO_SIZE_GB}GB, count=${REPO_FILE_COUNT})"
+  local requested_time
+  requested_time=$(date -u +%FT%TZ)
+  echo "${REPO_NAME},${REPO_SIZE_GB},${REPO_FILE_COUNT},pending,pending,false,${REPO_ACTUAL_SIZE},${requested_time}" >> "$LOCAL_TRACKING_FILE"
+  log "appended row for '${REPO_NAME}' (size=${REPO_SIZE_GB}GB [${REPO_ACTUAL_SIZE}], count=${REPO_FILE_COUNT}, requested=${requested_time})"
 }
 
-# Maps a field name (accepting both the short and full spellings) to
-# its 1-based CSV column: repo,size,count,config_status,migration_status,fedmember_added
+# --- connectivity + repo existence/creation (merged from repo_manager.sh) --
+
+checkConnectivity() {
+  jf rt ping --server-id="$SOURCE_SERVER_ID" >/dev/null || die "cannot reach ${SOURCE_SERVER_ID}"
+  jf rt ping --server-id="$TARGET_SERVER_ID" >/dev/null || die "cannot reach ${TARGET_SERVER_ID}"
+  log "source (${SOURCE_SERVER_ID}) and target (${TARGET_SERVER_ID}) reachable"
+}
+
+checkIfRepoExistInSource() {
+  jf rt curl -s -XGET api/repositories --server-id="$SOURCE_SERVER_ID" \
+    | jq -r '.[] | .key' | grep -qw "$REPO_NAME"
+}
+
+checkIfRepoExistInTarget() {
+  echo "REPO_NAME $REPO_NAME"
+  jf rt curl -s -XGET api/repositories --server-id="$TARGET_SERVER_ID" \
+    | jq -r '.[] | .key' | grep -w "$REPO_NAME"
+}
+
+createRepoInTarget() {
+  log "repo '${REPO_NAME}' not found in target — fetching source config"
+  jf rt curl -s -XGET "api/repositories/${REPO_NAME}" --server-id="$SOURCE_SERVER_ID" > "$REPO_CONFIG_FILE"
+
+  log "creating '${REPO_NAME}' in target from source config"
+  jf rt curl -s -XPUT "api/repositories/${REPO_NAME}" \
+    -H "Content-Type: application/json" \
+    -T "$REPO_CONFIG_FILE" \
+    --server-id="$TARGET_SERVER_ID" >/dev/null \
+    || die "failed to create repo '${REPO_NAME}' in target"
+
+  # The create API can return success before api/repositories' listing
+  # reflects it (seen in practice: creation succeeds, but an immediate
+  # re-check of the list doesn't show it yet). Retry with a short
+  # backoff instead of failing on the first miss.
+  local attempt
+  for attempt in 1 2 3 4 5; do
+    if checkIfRepoExistInTarget; then
+      log "repo '${REPO_NAME}' created in target"
+      rm -f "$REPO_CONFIG_FILE"
+      return 0
+    fi
+    log "repo '${REPO_NAME}' not visible in target listing yet (attempt ${attempt}/5) — retrying in 5s"
+    sleep 5
+  done
+
+  die "repo '${REPO_NAME}' still not found in target after create (checked 5 times over 25s)"
+}
+
+ensureTargetRepoAndFlipConfigStatus() {
+  if checkIfRepoExistInTarget; then
+    log "repo '${REPO_NAME}' already exists in target"
+  else
+    createRepoInTarget
+  fi
+  updateField 4 "completed"
+}
+
+# --- field updates (shared by --update mode and the config_status flip) --
+
 fieldToColumn() {
   case "$1" in
     config|config_status)         echo 4 ;;
@@ -161,7 +226,6 @@ fieldToColumn() {
   esac
 }
 
-# Sets one column's value for REPO_NAME's row, in place, in the local file.
 updateField() {
   local column="$1" value="$2"
   local tmp
@@ -172,7 +236,6 @@ updateField() {
   mv "$tmp" "$LOCAL_TRACKING_FILE"
 }
 
-# --update field=value [field=value ...]
 runUpdate() {
   downloadTrackingFile
 
@@ -192,8 +255,12 @@ runUpdate() {
   uploadTrackingFile
 }
 
-# Default mode: fetch + append (or skip if already present/migrated)
-runFetchAndAppend() {
+# --- main fetch/prepare mode --------------------------------------------
+
+runFetchAndPrepare() {
+  [[ -n "$SOURCE_SERVER_ID" ]] || die "--source-server <server-id> is required"
+  [[ -n "$TARGET_SERVER_ID" ]] || die "--target-server <server-id> is required"
+
   downloadTrackingFile
 
   local row
@@ -205,21 +272,28 @@ runFetchAndAppend() {
   fi
 
   if [[ -n "$row" ]]; then
-    log "'${REPO_NAME}' already has a pending row — nothing to append, leaving as-is"
-    exit 0
+    if [[ "$(configStatusOf "$row")" == "completed" ]]; then
+      log "'${REPO_NAME}' already has config_status=completed — nothing to do"
+      exit 0
+    fi
+    log "'${REPO_NAME}' has a pending row from a previous run — resuming at repo creation, not re-fetching size/count"
+  else
+    checkConnectivity
+    checkIfRepoExistInSource || die "repo '${REPO_NAME}' not found in source"
+    fetchRepoDetails
+    appendRow
   fi
 
-  fetchRepoDetails
-  appendRow
+  ensureTargetRepoAndFlipConfigStatus
   uploadTrackingFile
 }
 
 main() {
   if [[ "$UPDATE_MODE" == true ]]; then
-    [[ ${#UPDATE_ARGS[@]} -gt 0 ]] || die "usage: track_repo.sh <repo-name> --server <server-id> --update field=value [field=value ...]"
+    [[ ${#UPDATE_ARGS[@]} -gt 0 ]] || die "usage: pre-migration.sh <repo-name> --server <server-id> --update field=value [field=value ...]"
     runUpdate "${UPDATE_ARGS[@]}"
   else
-    runFetchAndAppend
+    runFetchAndPrepare
   fi
 }
 
